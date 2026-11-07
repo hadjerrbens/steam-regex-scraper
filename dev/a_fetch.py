@@ -1,5 +1,7 @@
-﻿import json
+﻿import csv
+import json
 import logging
+import os
 import re
 import sys
 import time
@@ -23,7 +25,11 @@ LOGGER = logging.getLogger("scrape")
 BASE_URL = "https://store.steampowered.com"
 SEARCH_URL = f"{BASE_URL}/search/"
 APP_URL = f"{BASE_URL}/app/"
-
+USER_AGENT = (
+    "SteamDatasetCoursework/1.0 "
+    "(gang dataset project; +https://besttrio.edu/steam-dataset; "
+    "contact: we@besttrio.edu)"
+)
 HEADERS = {
     "User-Agent": "ClassProject-RegexScraper/1.0",
     "Accept-Language": "en-US,en;q=0.9"
@@ -125,7 +131,7 @@ RAW_FIELDS: List[str] = [
 MAX_GAMES = 1200      # size of the final dataset
 PER_GENRE = 200       # games wanted per genre
 RAW_COLUMNS = list(RAW_FIELDS) + ["found_in_genres"]   # found_in_genres = genres we SEARCHED (not the page's genres)
-
+CHECKPOINT_EVERY = 50
 def setup_logging(log_dir:Path = LOG_DIR,verbose:bool=False)-> logging.Logger:
     log_dir.mkdir(parents=True,exist_ok=True)
     LOGGER.setLevel(logging.DEBUG)
@@ -456,7 +462,7 @@ def _normalize_game(game: Dict[str, Any]) -> Dict[str, Any]:
 def _validate_game(game: Dict[str, Any]) -> bool:
     return bool(
         game.get("app_id")
-        and game.get("name")
+        and game.get("title")
         and game.get("url")
     )
 
@@ -464,7 +470,7 @@ def _dev_and_publishers(html:str)->Dict[str,str]:
     found:Dict[str,List[str]] = {"developer":[], "publisher":[]}
     for chunk in _RE_DEV_ROW_SPLIT.split(html)[1:]:
         label = _RE_ROW_LABEL.search(chunk)
-        summary =_RE_REVIEW_SUMMARY.search(chunk)
+        summary =_RE_ROW_SUMMARY.search(chunk)
         if not (label and summary):
             continue
         key = label.group("label").strip().lower()
@@ -578,6 +584,185 @@ def load_extractor():
             return candidate, "{}:extract_app_page".format(module_name)
     LOGGER.info("parser not found -- using the built-in fallback extractor")
     return fallback_extract_app_page, "fallback_extract_app_page"
+
+
+def _atomic_write_csv(path: Path, rows: Sequence[Dict[str, Any]],
+                      fields: Sequence[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(fields), extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key) for key in fields})
+    os.replace(tmp, path)
+
+
+def load_checkpoint(path: Path = DATA_DIR / "raw.csv") -> Dict[str, Dict[str, Any]]:
+    done: Dict[str, Dict[str, Any]] = {}
+    if not path.exists():
+        return done
+    with path.open("r", newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            app_id = (row.get("app_id") or "").strip()
+            if app_id:
+                done[app_id] = row
+    return done
+
+
+def checkpoint(rows: Sequence[Dict[str, Any]], path: Path = DATA_DIR / "raw.csv") -> None:
+    _atomic_write_csv(path, rows, RAW_FIELDS)
+    LOGGER.info("CHECKPOINT | wrote %d rows to %s", len(rows), path)
+
+
+def crawl(games: Sequence[Dict[str, Any]],
+          extract_app_page,
+          resume: bool = True,
+          refresh: bool = False,
+          out_path: Path = DATA_DIR / "raw.csv") -> Dict[str, Any]:
+
+    rows: List[Dict[str, Any]] = []
+    stats = {
+        "total": len(games),
+        "ok": 0,
+        "age_gate": 0,
+        "verification": 0,
+        "empty": 0,
+        "failed": 0,
+        "resumed": 0,
+        "needs_fix": [],
+    }
+
+    already = load_checkpoint(out_path) if resume else {}
+
+    for index, game in enumerate(games, start=1):
+        app_id = game["app_id"]
+        url = game["url"]
+
+        if resume and app_id in already:
+            rows.append(already[app_id])
+            stats["resumed"] += 1
+            continue
+
+        html = cached_get(url, "app_{}".format(app_id), refresh=refresh)
+        status = detect_blockers(html, url)
+
+        tries = 0
+        while status == "verification" and tries < 2:
+            tries += 1
+            wait = backoff(tries)
+            LOGGER.warning("VERIFICATION page for %s -- waiting %.0fs and retrying "
+                           "(no bypass attempted)", url, wait)
+            time.sleep(wait)
+            html = cached_get(url, "app_{}".format(app_id), refresh=True)
+            status = detect_blockers(html, url)
+
+        if status == "age_gate":
+            LOGGER.info("AGE GATE | skipping %s (%s)", url, game.get("title", ""))
+            stats["age_gate"] += 1
+            row = {field: None for field in RAW_FIELDS}
+            row.update({"app_id": app_id, "url": url, "title": game.get("title"),
+                        "age_gate": "yes", "fetch_status": "age_gate"})
+            rows.append(row)
+        elif status in ("empty", "verification"):
+            LOGGER.warning("FAILED | %s | status=%s", url, status)
+            stats["failed"] += 1
+            stats[status] = stats.get(status, 0) + 1
+            row = {field: None for field in RAW_FIELDS}
+            row.update({"app_id": app_id, "url": url, "title": game.get("title"),
+                        "age_gate": "no", "fetch_status": status})
+            rows.append(row)
+        else:
+            try:
+                row = dict(extract_app_page(html, app_id))
+            except Exception as exc:  # noqa: BLE001 - one bad page must not kill the run
+                LOGGER.error("EXTRACT ERROR | %s | %s", url, exc)
+                stats["failed"] += 1
+                row = {field: None for field in RAW_FIELDS}
+                row.update({"app_id": app_id, "url": url, "title": game.get("title"),
+                            "age_gate": "no", "fetch_status": "extract_error"})
+                rows.append(row)
+            else:
+                row.setdefault("app_id", app_id)
+                row.setdefault("url", url)
+                row.setdefault("title", game.get("title"))
+                row.setdefault("age_gate", "no")
+                row.setdefault("fetch_status", "ok")
+                if row.get("title") is None:
+                    row["title"] = game.get("title")
+                rows.append(row)
+                stats["ok"] += 1
+
+        if index % CHECKPOINT_EVERY == 0:
+            checkpoint(rows, out_path)
+            LOGGER.info("PROGRESS | %d/%d games | ok=%d age_gate=%d failed=%d",
+                        index, stats["total"], stats["ok"], stats["age_gate"],
+                        stats["failed"])
+
+    expected = ("developer", "publisher", "release_date", "review_summary",
+                "price_final")
+    for row in rows:
+        if row.get("fetch_status") != "ok":
+            continue
+        missing = []
+        for field in expected:
+            value = row.get(field)
+            if value is None or (isinstance(value, str) and not value.strip()):
+                missing.append(field)
+        if missing:
+            stats["needs_fix"].append(
+                {"url": row.get("url"), "missing": missing})
+
+    checkpoint(rows, out_path)
+    return stats
+
+
+def write_run_summary(stats: Dict[str,Any],games:Sequence[Dict[str,Any]],path:Path=DATA_DIR/"run_summary.json")->None:
+    genres:Dict[str,int]={}
+    for game in games:
+        for genre in game.get("genres",[])or["unknown"]:
+            genres[genre] = genres.get(genre,0)+1
+    payload = {
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "delay_seconds": DELAY,
+        "user_agent": USER_AGENT,
+        "games_discovered": len(games),
+        "games_per_genre": genres,
+        "stats": {k: v for k, v in stats.items() if k != "needs_fix"},
+        "needs_fix_count": len(stats.get("needs_fix", [])),
+    }
+    path.parent.mkdir(parents=True,exist_ok=True)
+    path.write_text(json.dumps(payload,indent=2),encoding="utf-8")
+    LOGGER.info("SUMMARY | %s", json.dumps(payload["stats"]))
+
+def write_needs_fix(stats: Dict[str, Any], path: Path = DATA_DIR / "needs_fix.txt") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["{url}\t{fields}".format(url=item["url"], fields=",".join(item["missing"]))
+             for item in stats.get("needs_fix", [])]
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    LOGGER.info("NEEDS FIX | %d urls written to %s", len(lines), path)
+
+def build_schema() -> Dict[str, Any]:
+    return {
+        "description": "Column contract for data/data.csv (raw rows).",
+        "owner": "Member A (fetching & discovery) -> Member B (parsing) "
+                 "-> Member C (cleaning)",
+        "columns": list(RAW_FIELDS),
+        "notes": {
+            "app_id": "Steam app id, the primary key (digits only).",
+            "url": "https://store.steampowered.com/app/<app_id>/",
+            "title": "The game title.",
+            "genres": "'; ' separated. Filled by the fallback extractor; ",
+            "categories": "'; ' separated (Single-player, Steam Achievements, ...).",
+            "description_short": "The 'About This Game' text",
+            "metacritic_score": "",
+            "platforms": "",
+            "dlc_count": "",
+            "age_gate": "'yes' when the page was an age check: the fields are "
+                        "then empty on purpose and the game was NOT bypassed.",
+            "fetch_status": "ok | age_gate | empty | verification | extract_error",
+        },
+    }
 
 
 if __name__ == "__main__":
