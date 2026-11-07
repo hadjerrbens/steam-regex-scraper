@@ -224,4 +224,5 @@ cache/
 logs/
 data/raw.csv
 .venv/
-
+# IDE settings
+.idea/
