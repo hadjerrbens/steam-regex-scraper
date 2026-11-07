@@ -123,6 +123,7 @@ RAW_FIELDS: List[str] = [
     "dlc_count",
     "age_gate",
     "fetch_status",
+    "tags",
 ]
 MAX_GAMES = 1200      # size of the final dataset
 PER_GENRE = 200       # games wanted per genre
