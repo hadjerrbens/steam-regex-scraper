@@ -10,6 +10,8 @@ import html as html_lib
 
 import requests
 
+F = re.S | re.I
+
 ROOT = Path(__file__).resolve().parent.parent
 DEV_DIR = ROOT / "dev"
 CACHE_DIR = ROOT / "cache"
@@ -77,7 +79,7 @@ RE_SEARCH_MARKER = re.compile(
 
 RE_SEARCH_ROW = re.compile(
     r'<a\b[^>]*\bclass="[^"]*\bsearch_result_row\b[^"]*"[^>]*>(?P<body>.*?)</a>',
-    re.S | re.I,
+    F,
     )
 
 RE_APP_LINK = re.compile(
@@ -85,7 +87,7 @@ RE_APP_LINK = re.compile(
     re.I,
 )
 
-RE_TITLE = re.compile(r'<span class="title">(?P<title>.*?)</span>', re.S | re.I)
+RE_TITLE = re.compile(r'<span class="title">(?P<title>.*?)</span>', F)
 
 GENRES: List[Dict[str, Any]] = [
     {"name": "Action", "tag": 19},
@@ -377,56 +379,56 @@ def discover_games(max_games:int = MAX_GAMES,queries:Optional[Sequence[Dict[str,
 
 
 _RE_APP_NAME = re.compile(
-    r'<div id="appHubAppName"[^>]*>(?P<name>.*?)</div>', re.S | re.I
+    r'<div id="appHubAppName"[^>]*>(?P<name>.*?)</div>', F
 )
 # The developer row has an id ("developers_list") but the publisher row has
 # none, so both are read by their LABEL ("Developer:" / "Publisher:") inside
 # a <div class="dev_row">.
 _RE_DEV_ROW_SPLIT = re.compile(r'<div class="dev_row">', re.I)
 _RE_ROW_LABEL = re.compile(
-    r'<div class="subtitle column">\s*(?P<label>[^<]*?)\s*:\s*</div>', re.S | re.I
+    r'<div class="subtitle column">\s*(?P<label>[^<]*?)\s*:\s*</div>', F
 )
 _RE_ROW_SUMMARY = re.compile(
-    r'<div class="summary column"[^>]*>(?P<body>.*?)</div>', re.S | re.I
+    r'<div class="summary column"[^>]*>(?P<body>.*?)</div>', F
 )
-_RE_LINKS = re.compile(r"<a\b[^>]*>(?P<text>.*?)</a>", re.S | re.I)
-_RE_DATE = re.compile(r'<div class="date">(?P<date>.*?)</div>', re.S | re.I)
+_RE_LINKS = re.compile(r"<a\b[^>]*>(?P<text>.*?)</a>", F)
+_RE_DATE = re.compile(r'<div class="date">(?P<date>.*?)</div>', F)
 _RE_PRICE = re.compile(
-    r'class="discount_final_price[^"]*">(?P<price>.*?)</div>', re.S | re.I
+    r'class="discount_final_price[^"]*">(?P<price>.*?)</div>', F
 )
 _RE_ORIGINAL_PRICE = re.compile(
-    r'class="discount_original_price[^"]*">(?P<price>.*?)</div>', re.S | re.I
+    r'class="discount_original_price[^"]*">(?P<price>.*?)</div>', F
 )
 _RE_DISCOUNT_PCT = re.compile(
-    r'class="discount_pct"[^>]*>(?P<pct>[^<]*?)<', re.S | re.I
+    r'class="discount_pct"[^>]*>(?P<pct>[^<]*?)<', F
 )
 _RE_BUY_PRICE = re.compile(
-    r'game_purchase_price[^>]*>(?P<price>.*?)</div>', re.S | re.I
+    r'game_purchase_price[^>]*>(?P<price>.*?)</div>', F
 )
 _RE_REVIEW_SUMMARY = re.compile(
-    r'<span class="game_review_summary[^"]*">(?P<summary>.*?)</span>', re.S | re.I
+    r'<span class="game_review_summary[^"]*">(?P<summary>.*?)</span>', F
 )
 _RE_REVIEW_PCT = re.compile(
     r"(?P<pct>\d+)% of the (?P<count>[\d,]+) user reviews", re.I
 )
 _RE_DESC = re.compile(
-    r'<div id="game_area_description"[^>]*>(?P<body>.*?)</div>\s*</div>', re.S | re.I
+    r'<div id="game_area_description"[^>]*>(?P<body>.*?)</div>\s*</div>', F
 )
 _RE_CATEGORY = re.compile(
     r'class="game_area_details_specs_ctn"[^>]*>.*?<div class="label">'
     r"(?P<label>.*?)</div>",
-    re.S | re.I,
+    F,
     )
 # <b>Genre:</b> <span ...><a href=".../genre/Action/...">Action</a>, <a ...>Free to Play</a>
 # The page shows the genres twice: once as chips at the top (with the label
 # "Free To Play Games") and once in the details block (the canonical
 # "Free to Play").  We read the details block first and only fall back to
 # the chips, so a genre is not listed twice under two names.
-_RE_GENRE_BLOCK = re.compile(r"<b>Genre:</b>(?P<body>.{0,800}?)</span>", re.S | re.I)
+_RE_GENRE_BLOCK = re.compile(r"<b>Genre:</b>(?P<body>.{0,800}?)</span>", F)
 _RE_GENRE_LINK = re.compile(
     r'href="https?://store\.steampowered\.com/genre/'
     r'(?P<genre>[^/"?]+)/[^"]*"[^>]*>(?P<name>.*?)</a>',
-    re.S | re.I,
+    F,
     )
 # Some pages only carry the price inside a JSON blob, where the markup is
 # escaped (\" instead of "), so the live-HTML pattern does not match.
