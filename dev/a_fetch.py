@@ -224,6 +224,11 @@ def cached_get(url, name, params=None,refresh =False):
     except OSError as error:
         LOGGER.error("Cannot write cache %s: %s", path, error)
     return html
+def _drop_cache(name: str) -> None:
+    try:
+        (CACHE_DIR / f"{name}.html").unlink(missing_ok=True)
+    except OSError as error:
+        LOGGER.error("Cannot delete cache %s: %s", name, error)
 
 def detect_blockers(html:Optional[str],url:Optional[str]=None):
     if html is None or not html.strip():
@@ -272,6 +277,7 @@ def _unwrap_search_response(html:str)->str:
 
 def _search_page(start:int,count:int =COUNT,filters:Optional[Dict[str,Any]]=None,fixture:Optional[str]=None)->Tuple[List[Dict[str,Any]],Optional[str]]:
     filters = dict(filters or DEFAULT_SEARCH_PARAMS)
+    filters.update(APP_PARAMS)
     filters["start"] = start
     filters["count"] = count
 
@@ -611,7 +617,7 @@ def load_checkpoint(path: Path = DATA_DIR / "raw.csv") -> Dict[str, Dict[str, An
 
 
 def checkpoint(rows: Sequence[Dict[str, Any]], path: Path = DATA_DIR / "raw.csv") -> None:
-    _atomic_write_csv(path, rows, RAW_FIELDS)
+    _atomic_write_csv(path, rows, RAW_COLUMNS)
     LOGGER.info("CHECKPOINT | wrote %d rows to %s", len(rows), path)
 
 
@@ -644,7 +650,7 @@ def crawl(games: Sequence[Dict[str, Any]],
             stats["resumed"] += 1
             continue
 
-        html = cached_get(url, "app_{}".format(app_id), refresh=refresh)
+        html = cached_get(url, "app_{}".format(app_id),params=APP_PARAMS, refresh=refresh)
         status = detect_blockers(html, url)
 
         tries = 0
@@ -720,7 +726,12 @@ def crawl(games: Sequence[Dict[str, Any]],
 def write_run_summary(stats: Dict[str,Any],games:Sequence[Dict[str,Any]],path:Path=DATA_DIR/"run_summary.json")->None:
     genres:Dict[str,int]={}
     for game in games:
-        for genre in game.get("genres",[])or["unknown"]:
+        game_genres = (
+                game.get("found_in_genres")
+                or game.get("genres")
+                or ["unknown"]
+        )
+        for genre in game_genres:
             genres[genre] = genres.get(genre,0)+1
     payload = {
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -747,7 +758,7 @@ def build_schema() -> Dict[str, Any]:
         "description": "Column contract for data/data.csv (raw rows).",
         "owner": "Member A (fetching & discovery) -> Member B (parsing) "
                  "-> Member C (cleaning)",
-        "columns": list(RAW_FIELDS),
+        "columns": list(RAW_COLUMNS),
         "notes": {
             "app_id": "Steam app id, the primary key (digits only).",
             "url": "https://store.steampowered.com/app/<app_id>/",
@@ -764,12 +775,5 @@ def build_schema() -> Dict[str, Any]:
         },
     }
 
-
-if __name__ == "__main__":
-    setup_logging()
-
-    games = discover_page(0, 50, fixture="search_action.html")
-
-    print("Games found:", len(games))
-    for g in games[:3]:
-        print(g)
+def drop_cache(name: str):
+    _drop_cache(name)
