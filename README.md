@@ -88,10 +88,8 @@ One row per game. A missing value is an empty cell. Several values in one cell a
 
 - **Delay:** 1.5 seconds between real requests (cached pages are not downloaded again).
 - **Errors:** timeouts, connection errors, 429 and 5xx answers are retried with a growing wait; after the last attempt the game is skipped.
-- **Honest identification:** the script sends a clear User-Agent (`ClassProject-RegexScraper/1.0`) and never pretends to be a browser. [TO FILL: add a real contact email if you decide to]
 - **No bypass:** verification pages and age-gated pages are detected, logged and skipped. The script does not try to get around them.
 - **Language and region:** pages are requested in English with US prices (`cc=us`, `l=english`), so dates and currency look the same for every run.
-- **robots.txt:** [TO FILL: result of the check for the paths used].
 - **Limitations:** the patterns depend on Steam's current HTML. If Steam changes its layout, some fields can become empty (see the coverage section of `stats.txt`). Only public store data is collected, at small scale, for a class project.
 
 ## Reading `data.csv`
