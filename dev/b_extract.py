@@ -1,4 +1,6 @@
-"""this module is for regex extraction of games data from steam store pages"""
+"""this module is for regex extraction of games data from steam store pages.
+it has patterns for each field and a main entry point that takes one app page and returns a dict with all the fields.
+"""
 
 
 import re
@@ -17,8 +19,8 @@ RAW_FIELDS = [
     "app_id", "title", "url", "developer", "publisher", "release_date",
     "price_final", "price_original", "discount_pct", "is_free",
     "review_summary", "review_count", "review_pct_positive", "metacritic_score",
-    "genres", "categories", "platforms", "description_short", "dlc_count",
-    "age_gate", "fetch_status",
+    "genres", "categories", "tags", "platforms", "description_short", "dlc_count",
+    "age_gate", "fetch_status", 
 ]
 
 #the compiled patterns ,one re.compile per field
@@ -112,26 +114,26 @@ def clean(text):
     text = re.sub(r"\s+", " ", text).strip()
     return text or None
  
- 
+ #extract first match of a pattern from html using search regex function , return the cleaned group text or None if not found
 def first(pattern, html, group="v"):
-    """First match -> cleaned group text, or None."""
     m = pattern.search(html)
     return clean(m.group(group)) if m else None #clean the group text if match found, else return None
  
  
  
-
+#useful for developers, publishers and genres because they can have multiple links
+#
 def link_texts(pattern, html):
     """Block pattern, then every link text inside it, joined by ';'."""
     m = pattern.search(html)
     if not m:
         return None
     names = []
-    for x in RE_LINK_TEXT.findall(m.group("v")):  # NOTE: was RE_LINK (name did not exist), loop instead of list comprehension
+    for x in RE_LINK_TEXT.findall(m.group("v")):  #finds every link's text inside that block and clean it
         name = clean(x)
         if name:
-            names.append(name)
-    return ";".join(names) or None
+            names.append(name) #add ach valid name to the list
+    return ";".join(names) or None #combines the names into one string separated by ;
  
  
  
@@ -143,15 +145,15 @@ def get_title(html):
  
  
 def get_release_date(html):
-    return first(RE_RELEASE_DATE, html)  # NOTE: was RE_DATE (name did not exist)
+    return first(RE_RELEASE_DATE, html) 
  
  
 def get_developer(html):
-    return link_texts(RE_DEV_BLOCK, html)  # NOTE: was RE_DEV (name did not exist)
+    return link_texts(RE_DEV_BLOCK, html)  
  
  
 def get_publisher(html):
-    return link_texts(RE_PUB_BLOCK, html)  # NOTE: was RE_PUB (name did not exist)
+    return link_texts(RE_PUB_BLOCK, html)  
  
  
 def get_genres(html):
@@ -161,15 +163,16 @@ def get_genres(html):
 def get_description(html):
     return first(RE_DESC, html)
  
-# NOTE: get_tags was added by me, your file defined RE_TAG but never used it. "tags" is not in RAW_FIELDS yet.
+#
 def get_tags(html, limit=5):
-    """First `limit` user tags joined by ';'."""
+    #First limit user tags joined by ;
     tags = []
     for t in RE_TAG.findall(html):
         t = clean(t)
         if t:
             tags.append(t)
-    return ";".join(tags[:limit]) or None
+    return ";".join(tags[:limit]) or None #keeps only the first five by default
+ 
  
 def get_metascore(html):
     return first(RE_META, html)
@@ -179,10 +182,10 @@ def get_dlc_count(html):
  
  
 def get_age_gate(html):
-    return "1" if RE_AGE.search(html) else "0"
+    return "yes" if RE_AGE.search(html) else "no"
  
 def get_price(html):
-    """Returns price_final, price_original, discount_pct, is_free (raw strings)."""
+    #Returns price_final, price_original, discount_pct, is_free (raw strings)
     out = {"price_final": None, "price_original": None, "discount_pct": None, "is_free": None}
     box = RE_BUYBOX.search(html)
     if not box:
@@ -192,15 +195,15 @@ def get_price(html):
         out["price_final"] = first(RE_DISC_FINAL, b)
         out["price_original"] = first(RE_DISC_ORIG, b)
         out["discount_pct"] = first(RE_DISC_PCT, b)
-        out["is_free"] = "False"
+        out["is_free"] = "no"
     elif first(RE_PRICE, b):
         out["price_final"] = first(RE_PRICE, b)
-        out["is_free"] = "True" if "free" in out["price_final"].lower() else "False"
+        out["is_free"] = "yes" if "free" in out["price_final"].lower() else "no"
     return out
  
  
 def get_reviews(html):
-    """Returns review_summary, review_count, review_pct_positive (raw strings)."""
+    #Returns review_summary, review_count, review_pct_positive (raw strings)
     m = RE_REVIEW.search(html)  # NOTE: was RE_REVIEWS (name did not exist)
     if not m:
         return {"review_summary": None, "review_count": None, "review_pct_positive": None}
@@ -234,16 +237,18 @@ def get_categories(html):
  
  
   
-# ------------------------------------------------------------------ main entry
+"""" main entry"""
+
 def extract_app_page(html, app_id=None):
-    """One app page -> dict with exactly RAW_FIELDS keys. Missing = None. Never raises.
-    app_id is optional: if given it is copied into the record (A may pass it)."""
+    #One app page -> dict with exactly RAW_FIELDS keys. Missing = None. Never raises. app_id is optional: if given it is copied into the record (A may pass it)
     rec = {}
     for k in RAW_FIELDS:
         rec[k] = None
     if app_id:
         rec["app_id"] = str(app_id)
+        rec["url"] = "https://store.steampowered.com/app/" + str(app_id) + "/"
     if not html:
+        rec["fetch_status"] = "empty"
         return rec
     getters = [
         lambda: {"title": get_title(html)},
@@ -257,19 +262,21 @@ def extract_app_page(html, app_id=None):
         lambda: {"metacritic_score": get_metascore(html)},
         lambda: {"platforms": get_platforms(html)},
         lambda: {"categories": get_categories(html)},
+        lambda: {"tags": get_tags(html)},
         lambda: {"dlc_count": get_dlc_count(html)},
         lambda: {"age_gate": get_age_gate(html)},
     ]
     for g in getters:
         try:
             rec.update(g())
-        except Exception:  # one bad field must not kill the record
+        except Exception: #one bad regex or a change in the page format should not crash the whole extraction, just skip that field
             pass
+    rec["fetch_status"] = "ok"
     return rec
  
  
 def coverage(records):
-    """records -> prints and returns {field: % non-null}."""
+    #records then prints and returns {field: % non-null}
     fields = []
     for f in RAW_FIELDS:
         if f not in ("app_id", "url", "fetch_status"):

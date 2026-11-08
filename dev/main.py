@@ -1,7 +1,18 @@
 """
-Make fixtures/ for B and C using the SAME code that will do the real crawl (so B's regexes see exactly what requests gets).
-Put this file next to a_fetch.py (in dev/) and run from dev/:   python make_fixtures.py
-About 12 requests in total, 1.5 s apart (fetch() waits by itself).
+names : bensaid hadjer
+        saffih bouchra
+        dellali fatima
+website : steam store site https://store.steampowered.com/
+description of data collected : games from 10 genres (Action, RPG, Strategy, Adventure,
+Simulation, Indie, Casual, Racing, Horror, Shooter). 21 raw fields per game: title, developer,
+publisher, release date, price (final, original, discount %, free flag), review summary, count
+and % positive, metascore, genres, categories, platforms, short description, DLC count,
+age-gate flag. raw.csv keeps values as found, data.csv is cleaned (ISO dates, numeric
+prices, no HTML entities, no duplicates)
+
+AI percentage: 65% 
+and yes we understand it
+
 """
 import csv
 
