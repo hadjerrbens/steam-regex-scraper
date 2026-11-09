@@ -128,8 +128,9 @@ RAW_FIELDS: List[str] = [
     "age_gate",
     "fetch_status",
 ]
-MAX_GAMES = 1200      # size of the final dataset
-PER_GENRE = 200       # games wanted per genre
+MAX_GAMES = 10    # size of the final dataset
+PER_GENRE = 1      # games wanted per genre
+
 RAW_COLUMNS = list(RAW_FIELDS) + ["found_in_genres"]   # found_in_genres = genres we SEARCHED (not the page's genres)
 CHECKPOINT_EVERY = 50
 def setup_logging(log_dir:Path = LOG_DIR,verbose:bool=False)-> logging.Logger:
@@ -337,53 +338,134 @@ def has_no_more_results(html: Optional[str]) -> bool:
         return True
     return bool(RE_NO_MORE_RESULTS.search(html))
 
-def discover_games(max_games:int = MAX_GAMES,queries:Optional[Sequence[Dict[str,Any]]]=None,per_genre:int=PER_GENRE,count:int=COUNT)->List[Dict[str,Any]]:
+def discover_games(
+        max_games: int = MAX_GAMES,
+        queries: Optional[Sequence[Dict[str, Any]]] = None,
+        per_genre: int = PER_GENRE,
+        count: int = COUNT
+) -> List[Dict[str, Any]]:
+
     queries = list(GENRES if queries is None else queries)
+
     if per_genre is None:
-        per_genre = max(1, -(-max_games // max(1, len(queries))))
-    found:Dict[str,Any] = {}
-    order:List[str]=[]
+        per_genre = max(
+            1,
+            -(-max_games // max(1, len(queries)))
+        )
+
+    found: Dict[str, Any] = {}
+    order: List[str] = []
 
     for query in queries:
-        genre_name = query.get("name","unknown")
-        filters =_genre_filters(query)
+
+        if len(found) >= max_games:
+            LOGGER.info(
+                "Maximum number of unique games reached (%d). Stopping discovery.",
+                max_games
+            )
+            break
+
+        genre_name = query.get("name", "unknown")
+        filters = _genre_filters(query)
+
         seen_for_genre = 0
         start = 0
 
-        while seen_for_genre< per_genre and len(found) < max_games:
-            rows,html = _search_page(start,count=count,filters=filters)
+        LOGGER.info("Starting genre: %s", genre_name)
+
+        while seen_for_genre < per_genre and len(found) < max_games:
+
+            rows, html = _search_page(
+                start,
+                count=count,
+                filters=filters
+            )
+
             if not rows:
-                LOGGER.info("GENRE %s | no more rows at start=%d | stopping",
-                            genre_name, start)
+                LOGGER.info(
+                    "GENRE %s | no more rows at start=%d | stopping",
+                    genre_name,
+                    start
+                )
                 break
+
             for r in rows:
+
+                # Stop processing this genre when its limit is reached.
+                if seen_for_genre >= per_genre:
+                    break
+
+                # Stop everything if the global limit is reached.
+                if len(found) >= max_games:
+                    break
+
                 app_id = r["app_id"]
+
                 if app_id in found:
-                    tagged = found[app_id].setdefault("found_in_genres", [])
+
+                    # The game already exists: add this genre to its tags.
+                    tagged = found[app_id].setdefault(
+                        "found_in_genres", []
+                    )
+
                     if genre_name not in tagged:
                         tagged.append(genre_name)
+
                 else:
-                    if len(found)>= max_games:
-                        break
+
+                    # Store a new unique game.
                     r = dict(r)
-                    r["found_in_genres"]=[genre_name]
+                    r["found_in_genres"] = [genre_name]
+
                     found[app_id] = r
                     order.append(app_id)
+
+                # Count every encountered result, including duplicates.
                 seen_for_genre += 1
+
+            LOGGER.info(
+                "GENRE %s | processed %d/%d results | unique games: %d",
+                genre_name,
+                seen_for_genre,
+                per_genre,
+                len(found)
+            )
+
+            if seen_for_genre >= per_genre:
+                break
+
             total = get_total_results(html)
             start += count
-            if total and start>=total:
-                LOGGER.info("GENRE %s | reached the end (%d results) at start=%d",
-                            genre_name, total, start)
-                break
-            if has_no_more_results(html):
-                LOGGER.info("GENRE %s | the page says there are no more results "
-                            "at start=%d | stopping", genre_name, start)
-                break
-        LOGGER.info("GENRE %s | kept %d rows | unique games so far: %d",
-                        genre_name, seen_for_genre, len(found))
-    return [found[app_id] for app_id in order]
 
+            if total and start >= total:
+                LOGGER.info(
+                    "GENRE %s | reached the end (%d results) | stopping",
+                    genre_name,
+                    total
+                )
+                break
+
+            if has_no_more_results(html):
+                LOGGER.info(
+                    "GENRE %s | no more results at start=%d | stopping",
+                    genre_name,
+                    start
+                )
+                break
+
+        LOGGER.info(
+            "GENRE %s | kept %d results | unique games so far: %d",
+            genre_name,
+            seen_for_genre,
+            len(found)
+        )
+
+    LOGGER.info(
+        "DISCOVERY FINISHED | unique games discovered: %d",
+        len(found)
+    )
+
+    return [found[app_id] for app_id in order]
 
 
 
@@ -646,9 +728,20 @@ def crawl(games: Sequence[Dict[str, Any]],
         url = game["url"]
 
         if resume and app_id in already:
-            rows.append(already[app_id])
-            stats["resumed"] += 1
-            continue
+            old_row = already[app_id]
+            old_status = (old_row.get("fetch_status") or "").strip().lower()
+
+            if old_status in ("ok", "age_gate"):
+                rows.append(old_row)
+                stats["resumed"] += 1
+                continue
+
+            retry_previous = True
+
+            LOGGER.info(
+            "RETRY | previous fetch was unsuccessful: %s",
+            app_id
+             )
 
         html = cached_get(url, "app_{}".format(app_id),params=APP_PARAMS, refresh=refresh)
         status = detect_blockers(html, url)
@@ -777,3 +870,4 @@ def build_schema() -> Dict[str, Any]:
 
 def drop_cache(name: str):
     _drop_cache(name)
+

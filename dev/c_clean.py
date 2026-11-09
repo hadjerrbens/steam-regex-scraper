@@ -224,7 +224,6 @@ def clean_record(raw):
         "release_date": release_date,
         "release_year": release_year,
         "price_final": price_final,
-        "price_final_usd": price_final_usd,
         "price_original": price_original,
         "discount_pct": discount,
         "is_free": is_free,
@@ -238,6 +237,7 @@ def clean_record(raw):
         "platforms": split_items(raw.get("platforms")).lower(),
         "description_short": clean_text(raw.get("description_short"), passes=2),
         "dlc_count": to_int(raw.get("dlc_count")),
+        "price_final_usd": price_final_usd,
     }
 
 # Keep only the first row for each app ID.
