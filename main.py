@@ -10,9 +10,6 @@ from types import ModuleType
 from typing import Any
 
 
-# ============================================================
-# PROJECT PATHS
-# ============================================================
 
 ROOT = Path(__file__).resolve().parent
 DEV_DIR = ROOT / "dev"
@@ -31,17 +28,7 @@ RUN_SUMMARY_JSON = DATA_DIR / "run_summary.json"
 NEEDS_FIX_TXT = DATA_DIR / "needs_fix.txt"
 
 
-# ============================================================
-# LOAD A PYTHON FILE FROM ITS PATH
-# ============================================================
-
 def load_module(file_path: Path, module_name: str) -> ModuleType:
-    """
-    Load a Python module from a specific file path.
-
-    This allows main.py to receive the paths of the
-    fetcher, parser, and cleaner as command-line arguments.
-    """
 
     file_path = file_path.resolve()
 
@@ -62,7 +49,7 @@ def load_module(file_path: Path, module_name: str) -> ModuleType:
 
     module = importlib.util.module_from_spec(spec)
 
-    # Register before execution so normal module imports work.
+
     sys.modules[module_name] = module
 
     try:
@@ -73,10 +60,6 @@ def load_module(file_path: Path, module_name: str) -> ModuleType:
 
     return module
 
-
-# ============================================================
-# COMMAND-LINE ARGUMENTS
-# ============================================================
 
 def parse_args() -> argparse.Namespace:
 
@@ -168,9 +151,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-# ============================================================
-# PREPARE PROJECT DIRECTORIES
-# ============================================================
 
 def create_directories() -> None:
 
@@ -183,9 +163,6 @@ def create_directories() -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
-# ============================================================
-# LOAD THE THREE PROJECT MODULES
-# ============================================================
 
 def load_project_modules(
         args: argparse.Namespace
@@ -236,18 +213,10 @@ def load_project_modules(
     return fetcher, extractor, cleaner
 
 
-# ============================================================
-# CONFIGURE THE MODULE PATHS
-# ============================================================
-
 def configure_paths(
         fetcher: ModuleType,
         cleaner: ModuleType
 ) -> None:
-
-    # Member A's original ROOT uses the directory containing
-    # a_fetch.py. Since that file is inside dev/, correct it
-    # to point to the project root.
 
     fetcher.ROOT = ROOT
     fetcher.DEV_DIR = DEV_DIR
@@ -257,9 +226,6 @@ def configure_paths(
     fetcher.FIXTURE_DIR = FIXTURE_DIR
     fetcher.RAW_CSV = RAW_CSV
 
-    # Member C already calculates ROOT using parent.parent,
-    # but we explicitly align its output paths with this project.
-
     cleaner.ROOT = ROOT
     cleaner.DATA_DIR = DATA_DIR
     cleaner.RAW_CSV = RAW_CSV
@@ -268,17 +234,12 @@ def configure_paths(
     cleaner.STATS_TXT = STATS_TXT
 
 
-# ============================================================
-# CONFIGURE THE RAW CSV SCHEMA
-# ============================================================
 
 def configure_schema(
         fetcher: ModuleType,
         extractor: ModuleType
 ) -> None:
 
-    # The parser owns the fields it extracts.
-    # Use its schema for the CSV written by the fetcher.
 
     parser_fields = getattr(extractor, "RAW_FIELDS", None)
 
@@ -289,16 +250,13 @@ def configure_schema(
 
     fetcher.RAW_FIELDS = list(parser_fields)
 
-    # The fetcher also stores the genre used during discovery.
+
     fetcher.RAW_COLUMNS = (
             list(fetcher.RAW_FIELDS)
             + ["found_in_genres"]
     )
 
 
-# ============================================================
-# APPLY COMMAND-LINE SETTINGS
-# ============================================================
 
 def configure_settings(
         args: argparse.Namespace,
@@ -344,11 +302,6 @@ def configure_settings(
         "count": count,
     }
 
-
-# ============================================================
-# SELECT GENRES
-# ============================================================
-
 def select_genres(
         fetcher: ModuleType,
         genres_argument: str | None
@@ -390,9 +343,6 @@ def select_genres(
     return selected
 
 
-# ============================================================
-# STAGE 1: DISCOVER GAMES
-# ============================================================
 
 def stage_discover(
         fetcher: ModuleType,
@@ -429,10 +379,6 @@ def stage_discover(
     return games
 
 
-# ============================================================
-# READ DISCOVERED GAMES
-# ============================================================
-
 def read_discovered_games() -> list[dict[str, Any]]:
 
     if not DISCOVERED_JSON.is_file():
@@ -456,10 +402,6 @@ def read_discovered_games() -> list[dict[str, Any]]:
     return games
 
 
-# ============================================================
-# STAGE 2: FETCH HTML AND EXTRACT DATA
-# ============================================================
-
 def stage_fetch(
         fetcher: ModuleType,
         extractor: ModuleType,
@@ -469,8 +411,6 @@ def stage_fetch(
 
     logging.info("Starting fetching and extraction.")
 
-    # Pass Member B's real extractor directly to Member A's crawl.
-    # Do NOT use fetcher's fallback extractor.
 
     stats = fetcher.crawl(
         games=games,
@@ -499,10 +439,6 @@ def stage_fetch(
     return stats
 
 
-# ============================================================
-# STAGE 3: CLEAN DATA
-# ============================================================
-
 def stage_clean(cleaner: ModuleType) -> list[dict[str, Any]]:
 
     logging.info("Starting data cleaning.")
@@ -530,9 +466,6 @@ def stage_clean(cleaner: ModuleType) -> list[dict[str, Any]]:
     return cleaned_rows
 
 
-# ============================================================
-# MAIN PIPELINE
-# ============================================================
 
 def main() -> None:
 
@@ -540,27 +473,21 @@ def main() -> None:
 
     create_directories()
 
-    # Load the actual three files selected by the user.
 
     fetcher, extractor, cleaner = load_project_modules(args)
 
-    # Fix the paths before running any stage.
 
     configure_paths(fetcher, cleaner)
 
-    # Make the fetcher's CSV columns match the parser's fields.
 
     configure_schema(fetcher, extractor)
 
-    # Set up logging using the project's logs/ directory.
 
     fetcher.setup_logging(
         log_dir=LOG_DIR,
         verbose=args.verbose
     )
 
-    # Apply the settings after loading the fetcher,
-    # so its own defaults can be used.
 
     settings = configure_settings(args, fetcher)
 
@@ -599,7 +526,6 @@ def main() -> None:
         stage_clean(cleaner)
 
     else:
-        # Full pipeline: discover -> fetch/extract -> clean.
 
         games = stage_discover(
             fetcher,
@@ -619,9 +545,6 @@ def main() -> None:
     logging.info("Pipeline completed successfully.")
 
 
-# ============================================================
-# ENTRY POINT
-# ============================================================
 
 if __name__ == "__main__":
 
